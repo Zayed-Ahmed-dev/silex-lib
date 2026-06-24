@@ -17,7 +17,7 @@
 
 import { getPageSlug } from '../../page'
 import { ApiConnectorLoggedInPostMessage, ApiConnectorLoginQuery, ApiPublicationPublishBody, ClientSideFile, ClientSideFileType, ConnectorData, ConnectorType, ConnectorUser, JobStatus, Initiator, PublicationData, PublicationJobData, PublicationSettings, WebsiteData, WebsiteFile, WebsiteId, WebsiteSettings } from '../../types'
-import { Editor } from 'grapesjs'
+import { Editor, Page } from 'grapesjs'
 import { PublicationUi } from './PublicationUi'
 import { getUser, logout, publicationStatus, publish } from '../api'
 import { API_CONNECTOR_LOGIN, API_CONNECTOR_PATH, API_PATH, SILEX_VERSION } from '../../constants'
@@ -25,6 +25,7 @@ import { ClientEvent } from '../events'
 import { resetRenderComponents, resetRenderCssRules, transformPermalink, transformFiles, transformPath, renderComponents, renderCssRules } from '../publication-transformers'
 import { hashString } from '../utils'
 import { displayedToStored, isExternalUrl } from '../assetUrl'
+import { enable11ty } from './cms/publication'
 
 /**
  * @fileoverview Publication manager for Silex
@@ -305,21 +306,23 @@ export class PublicationManager {
       // Get the data to publish, clone the objects because plugins can change it
       const projectData = { ...this.editor.getProjectData() as WebsiteData }
       const siteSettings = { ...this.editor.getModel().get('settings') as WebsiteSettings }
-      const pages = (projectData.pages as any[]) || []
-      const hasIndex = pages.some(page => {
-      const name = page?.name || ''
-      return name.toLowerCase() === 'index'
-       })
-       console.log(hasIndex);
-      if (!hasIndex) {
-        this.editor.runCommand('notifications:add', {
-          id: 'publish-missing-index-warning',
-          type: 'warning',
-          group: 'publication',
-          message:
-            'No page named "index" found. The first page will be used as homepage. Rename a page to "index" to control homepage.',
+      const pages = (projectData.pages ?? []) as  Page[]
+      if (!enable11ty()) {
+        const hasIndex = pages.some(page => {
+          const name = page.get('name') || ''
+          return getPageSlug(name) === 'index'
         })
-      }      
+
+        if (!hasIndex) {
+          this.editor.runCommand('notifications:add', {
+            id: 'publish-missing-index-warning',
+            type: 'warning',
+            group: 'publication',
+            message:
+              `Page "${pages[0]?.get('name')}": Will be used as homepage because no page is named "index". The homepage is the page served at the root URL of your site.`
+          })
+        }
+      }     
       
       // Check for missing SEO tags and warn user
       this.checkSeoTags(siteSettings)
@@ -544,6 +547,8 @@ export class PublicationManager {
   async *getHtmlFilesYield(siteSettings: WebsiteSettings, preventDefault): AsyncGenerator<WebsiteFile | undefined> {
     const pages = this.editor.Pages.getAll()
     const hasIndex = pages.some(p => getPageSlug(p.get('name')) === 'index')
+    const firstPageId = pages[0]?.getId()
+    const hasDataSource = enable11ty()
     for (const page of this.editor.Pages.getAll()) {
       // Clone the settings because plugins can change them
       const clonedSiteSettings = { ...siteSettings }
@@ -562,11 +567,9 @@ export class PublicationManager {
       yield undefined // Yield control to avoid blocking the main thread
 
       // Transform the file paths
-      let slug = getPageSlug(page.get('name'));
+      let slug = getPageSlug(page.get('name'))
       // if no index page exist make the first page as home page
-      const firstPageId = pages[0]?.getId()
-
-      if (!hasIndex && page.getId() === firstPageId) {
+      if (!hasDataSource && !hasIndex && page.getId() === firstPageId) {
         slug = 'index'
       }
       const cssInitialPath = `/css/${slug}-${await hashString(cssContent)}.css`

@@ -69,7 +69,7 @@ export default function (editor: Editor, options: EleventyPluginOptions) {
 /**
  * Check if the 11ty publication is enabled
  */
-function enable11ty(): boolean {
+export function enable11ty(): boolean {
   return getAllDataSources()
     .filter(ds => ds.id !== EleventyDataSourceId)
     .length > 0
