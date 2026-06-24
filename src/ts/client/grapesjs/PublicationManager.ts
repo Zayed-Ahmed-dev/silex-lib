@@ -306,7 +306,7 @@ export class PublicationManager {
       // Get the data to publish, clone the objects because plugins can change it
       const projectData = { ...this.editor.getProjectData() as WebsiteData }
       const siteSettings = { ...this.editor.getModel().get('settings') as WebsiteSettings }
-      const pages = (projectData.pages ?? []) as  Page[]
+      const pages = this.editor.Pages.getAll()
       if (!enable11ty()) {
         const hasIndex = pages.some(page => {
           const name = page.get('name') || ''
