@@ -17,7 +17,7 @@
 
 import { getPageSlug } from '../../page'
 import { ApiConnectorLoggedInPostMessage, ApiConnectorLoginQuery, ApiPublicationPublishBody, ClientSideFile, ClientSideFileType, ConnectorData, ConnectorType, ConnectorUser, JobStatus, Initiator, PublicationData, PublicationJobData, PublicationSettings, WebsiteData, WebsiteFile, WebsiteId, WebsiteSettings } from '../../types'
-import { Editor, Page } from 'grapesjs'
+import { Editor} from 'grapesjs'
 import { PublicationUi } from './PublicationUi'
 import { getUser, logout, publicationStatus, publish } from '../api'
 import { API_CONNECTOR_LOGIN, API_CONNECTOR_PATH, API_PATH, SILEX_VERSION } from '../../constants'
@@ -306,22 +306,16 @@ export class PublicationManager {
       // Get the data to publish, clone the objects because plugins can change it
       const projectData = { ...this.editor.getProjectData() as WebsiteData }
       const siteSettings = { ...this.editor.getModel().get('settings') as WebsiteSettings }
-      const pages = this.editor.Pages.getAll()
-      if (!enable11ty()) {
-        const hasIndex = pages.some(page => {
-          const name = page.get('name') || ''
-          return getPageSlug(name) === 'index'
-        })
+      const { pages, shouldPromoteFirstPage } = this.getHomepagePromotionInfo()
 
-        if (!hasIndex) {
-          this.editor.runCommand('notifications:add', {
-            id: 'publish-missing-index-warning',
-            type: 'warning',
-            group: 'publication',
-            message:
-              `Page "${pages[0]?.get('name')}": Will be used as homepage because no page is named "index". The homepage is the page served at the root URL of your site.`
-          })
-        }
+      if (shouldPromoteFirstPage) {
+        this.editor.runCommand('notifications:add', {
+          id: 'publish-missing-index-warning',
+          type: 'warning',
+          group: 'publication',
+          message:
+            `Page "${pages[0]?.get('name')}": Will be used as homepage because no page is named "index". The homepage is the page served at the root URL of your site.`
+        })
       }     
       
       // Check for missing SEO tags and warn user
@@ -376,6 +370,24 @@ export class PublicationManager {
       this.editor.trigger(ClientEvent.PUBLISH_ERROR, { success: false, message: e.message })
       this.editor.trigger(ClientEvent.PUBLISH_END, { success: false, message: e.message })
       return
+    }
+  }
+
+  /**
+   * Helper function to determine if the first page should be promoted to the homepage.
+   * @returns Information about homepage promotion, including whether the first page
+   * should be promoted, the first page ID, and the list of pages.
+   */
+  private getHomepagePromotionInfo() {
+    const pages = this.editor.Pages.getAll()
+    const hasIndex = pages.some(
+      page => getPageSlug(page.get('name')) === 'index'
+    )
+
+    return {
+      pages,
+      firstPageId: pages[0]?.getId(),
+      shouldPromoteFirstPage: !enable11ty() && !hasIndex, 
     }
   }
 
@@ -545,10 +557,11 @@ export class PublicationManager {
   }
 
   async *getHtmlFilesYield(siteSettings: WebsiteSettings, preventDefault): AsyncGenerator<WebsiteFile | undefined> {
-    const pages = this.editor.Pages.getAll()
-    const hasIndex = pages.some(p => getPageSlug(p.get('name')) === 'index')
-    const firstPageId = pages[0]?.getId()
-    const hasDataSource = enable11ty()
+    const {
+      pages,
+      firstPageId,
+      shouldPromoteFirstPage
+    } = this.getHomepagePromotionInfo()
     for (const page of this.editor.Pages.getAll()) {
       // Clone the settings because plugins can change them
       const clonedSiteSettings = { ...siteSettings }
@@ -567,10 +580,19 @@ export class PublicationManager {
       yield undefined // Yield control to avoid blocking the main thread
 
       // Transform the file paths
-      let slug = getPageSlug(page.get('name'))
+      const originalSlug = getPageSlug(page.get('name'))
+      let slug = originalSlug
       // if no index page exist make the first page as home page
-      if (!hasDataSource && !hasIndex && page.getId() === firstPageId) {
+      const promotedToIndex = shouldPromoteFirstPage && page.getId() === firstPageId
+      if (promotedToIndex) {
         slug = 'index'
+      }
+      let finalHtml = htmlContent
+      if (promotedToIndex) {
+        finalHtml = finalHtml.replaceAll(
+          `href="./${originalSlug}.html"`,
+          'href="./"'
+        )
       }
       const cssInitialPath = `/css/${slug}-${await hashString(cssContent)}.css`
       const htmlInitialPath = `/${slug}.html`
@@ -614,7 +636,7 @@ ${['description', 'og:title', 'og:description', 'og:image']
     .map((prop) => `<meta name="${prop}" property="${prop}" content="${getSetting(prop)}"/>`)
     .join('\n')}
 </head>
-${htmlContent}
+${finalHtml}
 </html>`,
         css: cssContent,
         cssPath,
