@@ -576,24 +576,34 @@ export class PublicationManager {
       const cssContent = this.editor.getCss({ component: body })
       console.time(`getHtml ${page.getId()} ${page.get('name')}`)
       const htmlContent = this.editor.getHtml({ component: body })
+      console.log(htmlContent)
       console.timeEnd(`getHtml ${page.getId()} ${page.get('name')}`)
       yield undefined // Yield control to avoid blocking the main thread
 
       // Transform the file paths
-      const originalSlug = getPageSlug(page.get('name'))
+      const rawSlug = getPageSlug(page.get('name'))
+      const originalSlug = rawSlug.replace(/^Slug/i, '')
       let slug = originalSlug
       // if no index page exist make the first page as home page
       const promotedToIndex = shouldPromoteFirstPage && page.getId() === firstPageId
+      console.log({
+  promotedToIndex,
+  pageId: page.getId(),
+  firstPageId,
+  originalSlug
+})
       if (promotedToIndex) {
         slug = 'index'
       }
+      console.log(htmlContent)
       let finalHtml = htmlContent
       if (promotedToIndex) {
-        finalHtml = finalHtml.replaceAll(
-          `href="./${originalSlug}.html"`,
-          'href="./"'
+        finalHtml = finalHtml.replace(
+          new RegExp(`\\.\\/(${originalSlug})\\.html`, 'gi'),
+          './'
         )
       }
+      console.log(finalHtml)
       const cssInitialPath = `/css/${slug}-${await hashString(cssContent)}.css`
       const htmlInitialPath = `/${slug}.html`
       const cssPermalink = transformPermalink(this.editor, cssInitialPath, ClientSideFileType.CSS, Initiator.HTML)
